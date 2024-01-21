@@ -1169,6 +1169,13 @@ func TestRouteAdvertiser(t *testing.T) {
 	if routes.Len() != 1 || routes.At(0) != testPrefix {
 		t.Fatalf("got routes %v, want %v", routes, []netip.Prefix{testPrefix})
 	}
+
+	must.Do(ra.UnadvertiseRoute(testPrefix))
+
+	routes = b.Prefs().AdvertiseRoutes()
+	if routes.Len() != 0 {
+		t.Fatalf("got routes %v, want none", routes)
+	}
 }
 
 func TestRouterAdvertiserIgnoresContainedRoutes(t *testing.T) {
@@ -1200,8 +1207,10 @@ func TestObserveDNSResponse(t *testing.T) {
 	rc := &routeCollector{}
 	b.appConnector = appc.NewAppConnector(t.Logf, rc)
 	b.appConnector.UpdateDomains([]string{"example.com"})
+	b.appConnector.Wait(context.Background())
 
 	b.ObserveDNSResponse(dnsResponse("example.com.", "192.0.0.8"))
+	b.appConnector.Wait(context.Background())
 	wantRoutes := []netip.Prefix{netip.MustParsePrefix("192.0.0.8/32")}
 	if !slices.Equal(rc.routes, wantRoutes) {
 		t.Fatalf("got routes %v, want %v", rc.routes, wantRoutes)
@@ -1243,6 +1252,7 @@ func TestReconfigureAppConnector(t *testing.T) {
 	}).View()
 
 	b.reconfigAppConnectorLocked(b.netMap, b.pm.prefs)
+	b.appConnector.Wait(context.Background())
 
 	want := []string{"example.com"}
 	if !slices.Equal(b.appConnector.Domains().AsSlice(), want) {
@@ -1349,6 +1359,17 @@ type routeCollector struct {
 
 func (rc *routeCollector) AdvertiseRoute(pfx netip.Prefix) error {
 	rc.routes = append(rc.routes, pfx)
+	return nil
+}
+
+func (rc *routeCollector) UnadvertiseRoute(pfx netip.Prefix) error {
+	routes := rc.routes
+	rc.routes = rc.routes[:0]
+	for _, r := range routes {
+		if r != pfx {
+			rc.routes = append(rc.routes, r)
+		}
+	}
 	return nil
 }
 
